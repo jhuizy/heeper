@@ -29,6 +29,10 @@ library heeper-internal
                      , mtl
                      , lens
                      , http-types
+                     , directory
+                     , bcrypt
+                     , bytestring
+                     , jwt
   default-extensions:  AutoDeriveTypeable
                      , BangPatterns
                      , BinaryLiterals

@@ -2,8 +2,9 @@
 
 module Heeper where
 
-import           Control.Monad.State (lift, liftM)
+import           Control.Lens
 import           Control.Monad.IO.Class
+import           Control.Monad.State                  (lift, liftM)
 import           Data.String                          (fromString)
 import qualified Data.Text.Lazy                       as L
 import           Network.HTTP.Types.Status
@@ -13,58 +14,65 @@ import qualified User.Api                             as Api
 import qualified User.Database                        as DB
 import           Web.Scotty.Trans
 
-type AppM = ScottyT APIError IO
-type AppActionM = ActionT APIError IO
+newtype ScottyM a = ScottyM { runApp :: ScottyT APIError IO a } deriving (Functor, Applicative, Monad)
+type ActionM = ActionT APIError IO
 
 data APIError =
   NotFound Int
-  | BadRequest
-  | UnhandledError
+  | BadRequest String
+  | UnhandledError String
   deriving (Show, Eq)
 
 instance ScottyError APIError where
-  stringError _ = UnhandledError
+  stringError = UnhandledError
   showError = fromString . show
 
-errorHandler :: APIError -> AppActionM ()
+errorHandler :: APIError -> ActionM ()
 errorHandler (NotFound i) = do
   status status404
   text "Not Found"
-errorHandler BadRequest = do
+errorHandler (BadRequest s) = do
   status status400
-  text "Bad Request"
-errorHandler _ = do
+  text $ L.pack s
+errorHandler (UnhandledError s) = do
+  liftIO $ putStrLn s
   status status500
   text "Something went wrong..."
 
 main :: IO ()
-main = scottyT 3000 id $ do
+main = scottyT 3000 id (runApp app)
+
+app :: ScottyM ()
+app = ScottyM $ do
 
   let db = liftIO DB.init
 
   defaultHandler errorHandler
 
   middleware logStdout
-  get "/hello" $ text "hello world"
 
-  get "/hello/:id" $ do
-    id <- param "id"
-    text $ "hello " <> id
+  post "/login" $ do
+    (Api.LoginRequest email pass) <- rescue jsonData (raise . BadRequest . L.unpack . showError)
+    db' <- db
+    success <- liftIO $ DB.checkCredentials db' email pass
+    text . L.pack . show $ success
 
   get "/users/:id" $ do
     id <- param "id"
-    user <- liftIO $ db >>= flip DB.find id
+    db' <- db
+    user <- liftIO $ DB.find db' id
     maybe (raise $ NotFound id) (json . Api.fromUser) user
 
   get "/users" $ do
-    users <- liftIO $ db >>= DB.list
+    users <- runDB db DB.list
     json $ fmap Api.fromUser users
 
   post "/users" $ do
-    userReq <- jsonData :: AppActionM Api.CreateUserRequest
-    user <- liftIO $ db >>= (\db' -> DB.create db' (Api._curEmail userReq) (Api._curPassword userReq) (Api._curAge userReq))
+    (Api.CreateUserRequest email pass age) <- jsonData
+    db' <- db
+    user <- liftIO $ DB.create db' email pass age
     json $ Api.fromUser user
 
-
-
+runDB :: (Monad m, MonadIO m) => m DB.DB -> (DB.DB -> IO a) -> m a
+runDB db f = db >>= (liftIO . f)
 

@@ -1,15 +1,17 @@
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TemplateHaskell       #-}
 
 module User.Api where
 
+import           Control.Lens        hiding ((.=))
 import           Control.Monad.State
 import           Data.Aeson
 import           Data.Maybe
 import           GHC.Generics
 import           System.Random
-import           User.Database        
+import           User.Database
 
 data CreateUserRequest = CreateUserRequest
   { _curEmail    :: String
@@ -39,3 +41,18 @@ instance ToJSON GetUserResponse where
              , "email" .= email
              , "age" .= age
              ]
+
+data LoginRequest = LoginRequest
+    { _lrEmail    :: String
+    , _lrPassword :: String
+    } deriving (Show, Generic)
+
+instance FromJSON LoginRequest where
+  parseJSON (Object v) =
+    LoginRequest <$> v .: "email"
+                 <*> v .: "password"
+  parseJSON _ = mzero
+
+makeLenses ''CreateUserRequest
+makeLenses ''GetUserResponse
+makeLenses ''LoginRequest
